@@ -1,8 +1,8 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
-from .models import Client, EmployeeClientDetails
+from .models import Client, EmployeeClientDetails,Attendance,MonthlyTarget
 from django.conf import settings
-
+from datetime import date
 User = get_user_model()
 
 # ✅ Serializer for User Registration
@@ -87,3 +87,83 @@ class EmployeeClientDetailsSerializer(serializers.ModelSerializer):
     class Meta:
         model = EmployeeClientDetails
         fields = "__all__"
+
+
+
+class AttendanceSerializer(serializers.ModelSerializer):
+    user = UserSerializer(read_only=True)
+
+    class Meta:
+        model = Attendance
+        fields = ['id', 'user', 'date', 'status']
+
+
+class MonthlyTargetSerializer(serializers.ModelSerializer):
+    month = serializers.IntegerField(default=date.today().month)
+    year = serializers.IntegerField(default=date.today().year)
+    user = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.filter(role="employee"), required=False, allow_null=True
+    )
+
+    class Meta:
+        model = MonthlyTarget
+        fields = ["user", "month", "year", "target_clients", "approved_clients"]
+
+    def validate(self, attrs):
+        """Ensure month/year default values are applied if missing."""
+        attrs.setdefault("month", date.today().month)
+        attrs.setdefault("year", date.today().year)
+        return attrs
+
+    def create(self, validated_data):
+        """Handle case where user is None (assign targets to all employees)."""
+        user = validated_data.pop("user", None)  # Get user or None
+
+        if user:  # Creating target for a specific employee
+            target, _ = MonthlyTarget.objects.update_or_create(
+                user=user, month=validated_data["month"], year=validated_data["year"],
+                defaults={"target_clients": validated_data["target_clients"]}
+            )
+            return target
+        else:  # Creating target for ALL employees
+            employees = User.objects.filter(role="employee")
+            targets = []
+            for emp in employees:
+                target, _ = MonthlyTarget.objects.update_or_create(
+                    user=emp, month=validated_data["month"], year=validated_data["year"],
+                    defaults={"target_clients": validated_data["target_clients"]}
+                )
+                targets.append(target)
+            return targets  # Return a list when setting targets for all
+
+    def to_representation(self, instance):
+        """Ensure consistent output for multiple targets."""
+        if isinstance(instance, list):
+            return [super().to_representation(obj) for obj in instance]
+        return super().to_representation(instance)
+# class MonthlyTargetSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = MonthlyTarget
+#         fields = ["user", "month", "year", "target_clients"]
+#         extra_kwargs = {
+#             "user": {"required": False},   # Make user optional
+#             "month": {"required": False},  # Auto-set in create method
+#             "year": {"required": False},   # Auto-set in create method
+#         }
+
+#     def create(self, validated_data):
+#         # Auto-set month and year
+#         validated_data.setdefault("month", date.today().month)
+#         validated_data.setdefault("year", date.today().year)
+
+#         # If user is missing, raise an error
+#         if "user" not in validated_data:
+#             raise serializers.ValidationError({"user": "This field is required."})
+
+#         return super().create(validated_data)
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["id", "username", "email", "phone_number"]

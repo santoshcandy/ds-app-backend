@@ -1,11 +1,12 @@
 
-
+from datetime import date
 # Create your models here.
 from django.contrib.auth import get_user_model
 from django.db import models
 import os
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.conf import settings
 # User = get_user_model()  # Secure way to reference User model dynamically
 
 class UserManager(BaseUserManager):
@@ -150,3 +151,63 @@ class EmployeeClientDetails(models.Model):
 
     def __str__(self):
         return f"Details for {self.client.name} (Filled by {self.filled_by.username if self.filled_by else 'Unknown'})"
+ 
+
+
+ 
+class Attendance(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    date = models.DateField(auto_now_add=True)
+    status = models.CharField(max_length=10, choices=[('Present', 'Present'), ('Absent', 'Absent')])
+
+    def __str__(self):
+        return f"{self.user.username} - {self.date} - {self.status}"
+    
+
+class MonthlyTarget(models.Model):
+    user = models.ForeignKey(
+        User, null=True, blank=True,  # Allow null for "all employees"
+        on_delete=models.CASCADE, 
+        limit_choices_to={'role': 'employee'}
+    )
+    month = models.IntegerField(default=date.today().month)  # Default current month
+    year = models.IntegerField(default=date.today().year)  # Default current year
+    target_clients = models.IntegerField()  # Number of clients to approve
+    approved_clients = models.IntegerField(default=0)  # Auto-updated count
+
+    class Meta:
+        unique_together = ('user', 'month', 'year')  # Ensure only one target per user per month
+
+    def update_approved_clients(self):
+        """Auto-updates the approved client count based on the Client model."""
+        from app.models import Client  # Avoid circular imports
+
+        # Ensure update only happens for specific employees
+        if self.user:
+            approved_count = Client.objects.filter(
+                assigned_employee=self.user,
+                approval_status="approved",
+                created_at__month=self.month,
+                created_at__year=self.year
+            ).count()
+
+            if self.approved_clients != approved_count:  # Prevent unnecessary updates
+                self.approved_clients = approved_count
+                MonthlyTarget.objects.filter(pk=self.pk).update(approved_clients=approved_count)
+
+    def save(self, *args, **kwargs):
+        """Ensure approved_clients count is updated correctly."""
+        super().save(*args, **kwargs)  # Normal save
+        self.update_approved_clients()  # Update approvals only after save
+
+        # If user is null, create targets for all employees
+        if self.user is None:
+            employees = User.objects.filter(role="employee")
+            for emp in employees:
+                MonthlyTarget.objects.update_or_create(
+                    user=emp, month=self.month, year=self.year,
+                    defaults={"target_clients": self.target_clients}
+                )
+
+    def __str__(self):
+        return f"{self.user.username if self.user else 'All Employees'} - {self.month}/{self.year} (Target: {self.target_clients}, Approved: {self.approved_clients})"
