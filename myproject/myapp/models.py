@@ -104,6 +104,7 @@ class Client(models.Model):
         ('pending', 'Pending'),
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
+        ('proceed','Proceed')
     )
     approval_status = models.CharField(max_length=10, choices=status_choices, default='pending')
 

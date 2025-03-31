@@ -3,7 +3,7 @@ from .views import (
     ClientListCreateView, EmployeeClientUpdateView, ManagerClientUpdateView,
     EmployeeClientDetailsUpdateView,ClientApplicationView,UploadClientDocumentsView,
     GetClientDocumentsView,AttendanceListCreateView,MonthlyTargetView,EmployeeListView,
-    EmployeeClientListView,EmployeeTargetView,
+    EmployeeClientListView,EmployeeTargetView,EmployeePerformanceView,
 )
 from .views import RegisterEmployeeView, LoginEmployeeView, ClientRetrieveView,ManagerPerformanceView
  
@@ -29,6 +29,6 @@ urlpatterns = [
     path("manage/employees/", EmployeeListView.as_view(), name="manage-employees"),
     path("manage/employees/<int:employee_id>/clients/", EmployeeClientListView.as_view(), name="employee-clients"),
      path("targets/", MonthlyTargetView.as_view(), name="set-target"),
-    path("targets/my-performance/", EmployeeTargetView.as_view(), name="employee-performance"),
+    path("targets/my-performance/", EmployeePerformanceView.as_view(), name="employee-performance"),
     path("targets/performance/", ManagerPerformanceView.as_view(), name="manager-employee-performance"),
 ]

@@ -21,7 +21,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError 
-from datetime import date, datetime, time
+from datetime import date, datetime, time,timedelta
+from rest_framework.exceptions import PermissionDenied, NotFound
 
 # ✅ Generate JWT Token
 def get_tokens_for_user(user):
@@ -79,16 +80,16 @@ class IsEmployee(BasePermission):
     """
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role == 'employee'
-class IsManager(BasePermission):
-    """Allows access only to managers."""
-    def has_permission(self, request, view):
-        return request.user.is_authenticated and request.user.is_manager
 # class IsManager(BasePermission):
-#     """
-#     Custom permission: Only managers can access.
-#     """
+#     """Allows access only to managers."""
 #     def has_permission(self, request, view):
-#         return request.user.is_authenticated and request.user.role == 'manager'
+#         return request.user.is_authenticated and request.user.is_manager
+class IsManager(BasePermission):
+    """
+    Custom permission: Only managers can access.
+    """
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and request.user.role == 'manager'
 
 # ✅ Create & View Clients (Employees & Managers)
 class ClientListCreateView(generics.ListCreateAPIView):
@@ -128,11 +129,11 @@ class EmployeeClientUpdateView(generics.RetrieveUpdateAPIView):
     def get_queryset(self):
         user = self.request.user
 
-        # ✅ Correct way to check if the user is a manager
-        if user.groups.filter(name="Manager").exists():  
+        if user.groups.filter(name="Manager").exists():  # ✅ Correct way to check if user is a manager
             return Client.objects.all()  # Manager can update any client
 
-        return Client.objects.filter(assigned_employee=user) 
+        return Client.objects.filter(assigned_employee=user)  # Employee can update only assigned clients
+ 
      # Employee can update only assigned clients
 # ✅ Manager: View & Update Any Client
 class ManagerClientUpdateView(generics.RetrieveUpdateAPIView):
@@ -345,6 +346,7 @@ class AttendanceListCreateView(generics.ListCreateAPIView):
     serializer_class = AttendanceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+
     def get_queryset(self):
         user = self.request.user
         if user.role == 'manager':
@@ -407,6 +409,7 @@ class MonthlyTargetView(generics.ListCreateAPIView):
                 )
 
             return Response({"message": "Targets updated for all employees"})
+        
 class UpdateMonthlyTargetView(APIView):
     """Allow managers to update an existing employee's target."""
     permission_classes = [permissions.IsAuthenticated]
@@ -453,7 +456,7 @@ class EmployeeTargetView(generics.ListAPIView):
 
 
 class EmployeePerformanceView(APIView):
-    """Get employee performance history with correct completion count."""
+    """Get employee performance, attendance, and target history."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request, *args, **kwargs):
@@ -461,32 +464,47 @@ class EmployeePerformanceView(APIView):
         today = date.today()
         current_month, current_year = today.month, today.year
 
+        # Serialize user details
+        user_data = UserSerializer(user).data  
+
         # Get current month's target
-        current_target = MonthlyTarget.objects.filter(user=user, month=current_month, year=current_year).first()
+        current_target = MonthlyTarget.objects.filter(
+            user=user, month=current_month, year=current_year
+        ).first()
 
-        # Get last 5 months' history
-        five_months_ago = today - timedelta(days=150)  # Approx. 5 months
+        # Get last 4 months' target history (excluding current month)
+        four_months_ago = today.replace(day=1) - timedelta(days=1)
+        four_months_ago = four_months_ago.replace(day=1)
+
         past_targets = MonthlyTarget.objects.filter(
-            user=user, 
-            year__gte=five_months_ago.year,
-            month__gte=five_months_ago.month
-        ).order_by("-year", "-month")[:5]
+            user=user,
+            year__gte=four_months_ago.year,
+            month__gte=four_months_ago.month
+        ).exclude(month=current_month, year=current_year).order_by("-year", "-month")[:4]
 
-        # Count approved clients from Client model
+        # Get last 10 days' attendance
+        ten_days_ago = today - timedelta(days=10)
+        attendance_records = Attendance.objects.filter(
+            user=user,
+            date__gte=ten_days_ago
+        ).values("date", "status")  
+
+        # Count approved clients
         approved_clients = Client.objects.filter(
-            assigned_employee=user, 
+            assigned_employee=user,
             approval_status="approved"
         ).count()
 
-        # Calculate completion percentage
+        # Completion percentage helper
         def calculate_completion(target):
             if target and target.target_clients > 0:
                 return f"{(target.approved_clients / target.target_clients) * 100:.2f}%"
             return "0%"
 
-        # Format response
+        # Response format
         response_data = {
-            "employee": user.username,
+            "employee": user_data,  # Full employee details
+            "attendance_last_10_days": list(attendance_records),
             "current_month": {
                 "month": current_month,
                 "year": current_year,
@@ -494,7 +512,7 @@ class EmployeePerformanceView(APIView):
                 "approved_clients": approved_clients,
                 "completion": calculate_completion(current_target)
             },
-            "last_5_months": [
+            "last_4_months": [
                 {
                     "month": target.month,
                     "year": target.year,
@@ -506,8 +524,6 @@ class EmployeePerformanceView(APIView):
         }
 
         return Response(response_data)
-
- 
 
 class ManagerPerformanceView(generics.ListAPIView):
     """
@@ -521,93 +537,72 @@ class ManagerPerformanceView(generics.ListAPIView):
             raise PermissionDenied("Only managers can view performance data.")
 
         employee_id = request.query_params.get("employee_id")
+        today = date.today()
+        last_five_months = [(today.month - i, today.year) for i in range(5)]
 
         if employee_id:
-            return self.get_specific_employee_performance(employee_id)
-        return self.get_all_employees_performance()
+            return self.get_specific_employee_performance(employee_id, last_five_months)
+        return self.get_all_employees_performance(last_five_months)
 
-    def get_specific_employee_performance(self, employee_id):
+    def get_specific_employee_performance(self, employee_id, last_five_months):
         try:
             employee = User.objects.get(id=employee_id, role="employee")
         except User.DoesNotExist:
             raise NotFound("Employee not found.")
 
-        today = date.today()
-        last_five_months = [(today.month - i, today.year) for i in range(5)]
+        performance_data = self.get_employee_performance(employee, last_five_months)
 
+        return Response({
+            "employee_id": employee.id,
+            "employee": employee.username,
+            "performance": performance_data
+        })
+
+    def get_all_employees_performance(self, last_five_months):
+        employees = User.objects.filter(role="employee")
+        performance_data = [
+            {
+                "employee_id": employee.id,
+                "employee": employee.username,
+                "performance": self.get_employee_performance(employee, last_five_months)
+            }
+            for employee in employees
+        ]
+
+        return Response(performance_data)
+
+    def get_employee_performance(self, employee, last_five_months):
+        """Fetches performance data for a single employee over the last five months."""
         targets = MonthlyTarget.objects.filter(
             user=employee,
             month__in=[m[0] for m in last_five_months],
             year__in=[m[1] for m in last_five_months]
         )
 
-        performance_data = [
+        return [
             {
                 "month": target.month,
                 "year": target.year,
                 "target_clients": target.target_clients,
-                "approved_clients": Client.objects.filter(
-                    assigned_employee=employee,
-                    approval_status="approved",
-                    created_at__month=target.month,
-                    created_at__year=target.year
-                ).count(),  # ✅ Dynamically fetch approved clients
-                "completion": f"{(Client.objects.filter(
-                    assigned_employee=employee,
-                    approval_status='approved',
-                    created_at__month=target.month,
-                    created_at__year=target.year
-                ).count() / target.target_clients * 100) if target.target_clients else 0:.2f}%"
+                "approved_clients": self.get_approved_clients(employee, target.month, target.year),
+                "completion": self.calculate_completion(target.target_clients, employee, target.month, target.year)
             }
             for target in targets
         ]
 
-        return Response({
-            "employee": employee.username,
-            "performance": performance_data
-        })
+    def get_approved_clients(self, employee, month, year):
+        """Returns the count of approved clients for a given employee and time period."""
+        return Client.objects.filter(
+            assigned_employee=employee,
+            approval_status="approved",
+            created_at__month=month,
+            created_at__year=year
+        ).count()
 
-    def get_all_employees_performance(self):
-        today = date.today()
-        last_five_months = [(today.month - i, today.year) for i in range(5)]
-
-        employees = User.objects.filter(role="employee")
-        performance_data = []
-
-        for employee in employees:
-            targets = MonthlyTarget.objects.filter(
-                user=employee,
-                month__in=[m[0] for m in last_five_months],
-                year__in=[m[1] for m in last_five_months]
-            )
-
-            employee_performance = {
-                "employee": employee.username,
-                "performance": [
-                    {
-                        "month": target.month,
-                        "year": target.year,
-                        "target_clients": target.target_clients,
-                        "approved_clients": Client.objects.filter(
-                            assigned_employee=employee,
-                            approval_status="approved",
-                            created_at__month=target.month,
-                            created_at__year=target.year
-                        ).count(),  # ✅ Dynamically fetch approved clients
-                        "completion": f"{(Client.objects.filter(
-                            assigned_employee=employee,
-                            approval_status='approved',
-                            created_at__month=target.month,
-                            created_at__year=target.year
-                        ).count() / target.target_clients * 100) if target.target_clients else 0:.2f}%"
-                    }
-                    for target in targets
-                ]
-            }
-
-            performance_data.append(employee_performance)
-
-        return Response(performance_data)
+    def calculate_completion(self, target_clients, employee, month, year):
+        """Calculates the completion percentage."""
+        approved_count = self.get_approved_clients(employee, month, year)
+        return f"{(approved_count / target_clients * 100) if target_clients else 0:.2f}%"
 
     
 class EmployeeListView(generics.ListAPIView):
