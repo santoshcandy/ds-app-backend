@@ -293,13 +293,14 @@ class SendApprovalRequestView(APIView):
 
         except Client.DoesNotExist:
             return Response({"error": "Client not found or not assigned to you."}, status=status.HTTP_404_NOT_FOUND)
+
+
 class UploadClientDocumentsView(APIView):
-    parser_classes = [MultiPartParser, FormParser]  # ✅ Handles file uploads
-    permission_classes = [IsAuthenticated]  # ✅ Requires JWT authentication
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticated]
 
     def patch(self, request, client_id):
-        print("🔴 DEBUG: Received Data -->", request.data)  # ✅ Print form fields
-        print("🔴 DEBUG: Received FILES -->", request.FILES)  # ✅ Print uploaded files
+        print("🔴 DEBUG: Received FILES -->", request.FILES)
 
         try:
             client = Client.objects.get(id=client_id)
@@ -308,18 +309,22 @@ class UploadClientDocumentsView(APIView):
 
         extra_details, created = EmployeeClientDetails.objects.get_or_create(client=client)
 
-        serializer = EmployeeClientDetailsSerializer(extra_details, data=request.data, partial=True)
+        # ✅ Manually assign each file field before saving
+        for field_name, file in request.FILES.items():
+            print(f"🟡 Saving {field_name}: {file.name}")  # Debugging line
+            setattr(extra_details, field_name, file)
 
-        if serializer.is_valid():
-            serializer.save()
-            print("✅ DEBUG: Saved successfully")
-            return Response({
-                "message": "Documents uploaded successfully",
-                "data": serializer.data
-            }, status=status.HTTP_200_OK)
+        extra_details.save()  # ✅ Manually save after assigning files
 
-        print("❌ DEBUG: Serializer Errors -->", serializer.errors)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer = EmployeeClientDetailsSerializer(extra_details)
+
+        return Response({
+            "message": "Documents uploaded successfully",
+            "data": serializer.data
+        }, status=200)
+
+
+
 
 
 class GetClientDocumentsView(APIView):

@@ -54,39 +54,43 @@ class ClientSerializer(serializers.ModelSerializer):
 #         model = EmployeeClientDetails
 #         fields = "__all__"
 
-
 class EmployeeClientDetailsSerializer(serializers.ModelSerializer):
-    aadhaar_front = serializers.SerializerMethodField()
-    aadhaar_back = serializers.SerializerMethodField()
-    cibil_report = serializers.SerializerMethodField()
-    pan_card = serializers.SerializerMethodField()
-    gas_bill = serializers.SerializerMethodField()
-
-    def get_full_url(self, file_field):
-        """Convert relative file path to full URL."""
-        if file_field:
-            request = self.context.get("request")
-            return request.build_absolute_uri(settings.MEDIA_URL + str(file_field)) if request else f"{settings.MEDIA_URL}{file_field}"
-        return None
-
-    def get_aadhaar_front(self, obj):
-        return self.get_full_url(obj.aadhaar_front)
-
-    def get_aadhaar_back(self, obj):
-        return self.get_full_url(obj.aadhaar_back)
-
-    def get_cibil_report(self, obj):
-        return self.get_full_url(obj.cibil_report)
-
-    def get_pan_card(self, obj):
-        return self.get_full_url(obj.pan_card)
-
-    def get_gas_bill(self, obj):
-        return self.get_full_url(obj.gas_bill)
-
     class Meta:
         model = EmployeeClientDetails
         fields = "__all__"
+
+# class EmployeeClientDetailsSerializer(serializers.ModelSerializer):
+#     aadhaar_front = serializers.SerializerMethodField()
+#     aadhaar_back = serializers.SerializerMethodField()
+#     cibil_report = serializers.SerializerMethodField()
+#     pan_card = serializers.SerializerMethodField()
+#     gas_bill = serializers.SerializerMethodField()
+
+#     def get_full_url(self, file_field):
+#         """Convert relative file path to full URL."""
+#         if file_field:
+#             request = self.context.get("request")
+#             return request.build_absolute_uri(settings.MEDIA_URL + str(file_field)) if request else f"{settings.MEDIA_URL}{file_field}"
+#         return None
+
+#     def get_aadhaar_front(self, obj):
+#         return self.get_full_url(obj.aadhaar_front)
+
+#     def get_aadhaar_back(self, obj):
+#         return self.get_full_url(obj.aadhaar_back)
+
+#     def get_cibil_report(self, obj):
+#         return self.get_full_url(obj.cibil_report)
+
+#     def get_pan_card(self, obj):
+#         return self.get_full_url(obj.pan_card)
+
+#     def get_gas_bill(self, obj):
+#         return self.get_full_url(obj.gas_bill)
+
+#     class Meta:
+#         model = EmployeeClientDetails
+#         fields = "__all__"
 
 
 
